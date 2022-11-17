@@ -1,0 +1,5 @@
+os-x-universal-jre/*.tar.gz
+os-x-universal-jre/*.jar
+os-x-universal-jre/universal
+os-x-universal-jre/arm64
+os-x-universal-jre/x86_64
