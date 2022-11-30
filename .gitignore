@@ -6,4 +6,6 @@ os-x-universal-jre/x86_64
 
 os-x-launcher/JavaAppLauncher
 os-x-launcher/launcher-arm64
+os-x-launcher/launcher-arm64.o
 os-x-launcher/launcher-x86_64
+os-x-launcher/launcher-x86_64.o
