@@ -27,24 +27,16 @@ int
 main(int argc, char **argv)
 {
     char app_path[PATH_MAX];
-    char command[PATH_MAX];
     uint32_t path_size = PATH_MAX;
-    int ret;
+    char *args[] = { "run.sh", NULL };
 
-    /* Change current directory to the main "Contents" directory of the application. */
     if ( ! _NSGetExecutablePath(app_path, &path_size) ) {
-        if ( ! remove_last_components(app_path, 2) )
-            chdir(app_path);
+        if ( ! remove_last_components(app_path, 2) ) {
+            strncat(app_path, "/run.sh", PATH_MAX);
+            execv(app_path, args);
+        }
     }
 
-    /* Append our argument to the command, if any. */
-    if ( argc > 1 && strlen(argv[2]) < (PATH_MAX - 11) )
-        snprintf(command, sizeof(command), "./run.sh %s", argv[2]);
-    else
-        strncpy(command, "./run.sh", sizeof(command));
-
-    /* Run the real launch script. */
-    ret = system(command);
-
-    return ret;
+    /* If we reach this point, we couldn't execute the run.sh script. */
+    return EXIT_FAILURE;
 }
