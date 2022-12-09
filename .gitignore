@@ -4,7 +4,7 @@ os-x-universal-jre/universal
 os-x-universal-jre/arm64
 os-x-universal-jre/x86_64
 
-os-x-launcher/JavaAppLauncher
+os-x-launcher/protege
 os-x-launcher/launcher-arm64
 os-x-launcher/launcher-arm64.o
 os-x-launcher/launcher-x86_64
