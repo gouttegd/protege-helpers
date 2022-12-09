@@ -20,6 +20,27 @@ typedef jint (JNICALL CreateJavaVM_t)(JavaVM **vm, void **env, void *args);
 static char bundle_path[PATH_MAX];
 static void *java_library = NULL;
 
+static char *default_jvm_options[] = {
+    "-Dlogback.configurationFile=conf/logback.xml",
+    "-DentityExpansionLimit=100000000",
+    "-Dfile.encoding=UTF-8",
+    "-XX:CompileCommand=exclude,javax/swing/text/GlyphView,getBreakSpot",
+    "-Dapple.laf.useScreenMenuBar=true",
+    "-Dcom.apple.mrj.application.apple.menu.about.name=Protege",
+    "-Xdock:name=Protege",
+    "-Xdock:icon=Resources/Protege.icns",
+    "-Djava.class.path"
+      "=bundles/guava.jar"
+      ":bundles/logback-classic.jar"
+      ":bundles/logback-core.jar"
+      ":bundles/slf4j-api.jar"
+      ":bundles/glassfish-corba-orb.jar"
+      ":bundles/org.apache.felix.main.jar"
+      ":bundles/maven-artifact.jar"
+      ":bundles/protege-launcher.jar",
+    NULL
+};
+
 
 /*
  * Dummy callback for the main thread loop.
@@ -113,14 +134,29 @@ start_jvm(void *arg)
 
     (*jvm)->DetachCurrentThread(jvm);
     (*jvm)->DestroyJavaVM(jvm);
+    free(((JavaVMInitArgs *)arg)->options);
 
     exit(EXIT_SUCCESS);
+}
+
+static JavaVMOption *
+get_jvm_options(int *n_options)
+{
+    JavaVMOption *jvm_opts = NULL;
+    int i;
+
+    *n_options = (sizeof(default_jvm_options) / sizeof(char *)) - 1;
+    jvm_opts = calloc(*n_options, sizeof(JavaVMOption));
+    for ( i = 0; i < *n_options; i++ )
+        jvm_opts[i].optionString = default_jvm_options[i];
+
+    return jvm_opts;
 }
 
 int
 main(int argc, char **argv)
 {
-    JavaVMOption jvm_opts[9];
+    JavaVMOption *jvm_opts;
     JavaVMInitArgs jvm_args;
     pthread_t jvm_thread;
     pthread_attr_t jvm_thread_attr;
@@ -141,27 +177,9 @@ main(int argc, char **argv)
 
     /* Preparing Java options.
      * TODO: allow to configure memory parameters. */
-    jvm_opts[0].optionString = "-Dlogback.configurationFile=conf/logback.xml";
-    jvm_opts[1].optionString = "-DentityExpansionLimit=100000000";
-    jvm_opts[2].optionString = "-Dfile.encoding=UTF-8";
-    jvm_opts[3].optionString = "-XX:CompileCommand=exclude,javax/swing/text/GlyphView,getBreakSpot";
-    jvm_opts[4].optionString = "-Dapple.laf.useScreenMenuBar=true";
-    jvm_opts[5].optionString = "-Dcom.apple.mrj.application.apple.menu.about.name=Protege";
-    jvm_opts[6].optionString = "-Xdock:name=Protege";
-    jvm_opts[7].optionString = "-Xdock:icon=Resources/Protege.icns";
-    jvm_opts[8].optionString = "-Djava.class.path"
-                               "=bundles/guava.jar"
-                               ":bundles/logback-classic.jar"
-                               ":bundles/logback-core.jar"
-                               ":bundles/slf4j-api.jar"
-                               ":bundles/glassfish-corba-orb.jar"
-                               ":bundles/org.apache.felix.main.jar"
-                               ":bundles/maven-artifact.jar"
-                               ":bundles/protege-launcher.jar";
 
     jvm_args.version = JNI_VERSION_1_2;
-    jvm_args.nOptions = 9;
-    jvm_args.options = jvm_opts;
+    jvm_args.options = get_jvm_options(&(jvm_args.nOptions));
     jvm_args.ignoreUnrecognized = JNI_TRUE;
 
     /* Start the thread where the JVM will run. */
