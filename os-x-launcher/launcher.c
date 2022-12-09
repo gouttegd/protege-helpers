@@ -1,7 +1,9 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <unistd.h>                         /* chdir */
+#include <sys/stat.h>
 #include <err.h>
 #include <dlfcn.h>                          /* dlopen/dlsym */
 #include <pthread.h>
@@ -139,6 +141,120 @@ start_jvm(void *arg)
     exit(EXIT_SUCCESS);
 }
 
+static char *
+find_configuration_file(char *buffer, size_t len)
+{
+    char *home;
+    struct stat st_buf;
+
+    if ( (home = getenv("HOME")) ) {
+        if ( snprintf(buffer, len, "%s/.protege/conf/jvm.conf", home) < len ) {
+            if ( stat(buffer, &st_buf) == 0 )
+                return buffer;
+        }
+    }
+
+    if ( snprintf(buffer, len, "%s/conf/jvm.conf", bundle_path) < len ) {
+        if ( stat(buffer, &st_buf) == 0 )
+            return buffer;
+    }
+
+    return NULL;
+}
+
+/*
+ * Discards characters from the specified stream up to the next end of line.
+ */
+static int
+discard_line(FILE *f)
+{
+    int c;
+
+    while ( (c = fgetc(f)) != '\n' && c != EOF ) ;
+
+    return c == EOF ? -1 : 0;
+}
+
+/*
+ * Reads a single line from the specified stream. This function differs from
+ * standard fgets(3) in two aspects: the newline character is not stored, and
+ * if the line to read is too long to fit into the provided buffer, the whole
+ * line is discarded.
+ */
+static ssize_t
+get_line(FILE *f, char *buffer, size_t len)
+{
+    int c;
+    size_t n = 0;
+
+    while ( (c = fgetc(f)) != '\n' ) {
+        if ( c == EOF )
+            return -1;
+
+        if ( n >= len - 1 ) {   /* line too long */
+            discard_line(f);
+            return -1;
+        }
+
+        buffer[n++] = (char)c;
+    }
+    buffer[n] = '\0';
+
+    return n;
+}
+
+static void
+get_extra_jvm_options(JavaVMOption **jvm_opts, int *n_options)
+{
+    char conf_file_path[PATH_MAX];
+    char line[100], *opt_value, *option_string;
+    ssize_t n;
+    int current_max = *n_options;
+    FILE *conf_file;
+
+    if ( ! find_configuration_file(conf_file_path, PATH_MAX) )
+        return;
+
+    if ( ! (conf_file = fopen(conf_file_path, "r")) ) {
+        warn("Cannot open configuration file at %s", conf_file_path);
+    }
+
+    while ( ! feof(conf_file) ) {
+        if ( (n = get_line(conf_file, line, sizeof(line))) > 0 ) {
+            if ( line[0] == '#' )
+                continue;
+
+            if ( ! (opt_value = strchr(line, '=')) )
+                continue;
+
+            *opt_value++ = '\0';
+            option_string = NULL;
+            /*
+             * TODO: Check for correctness of the option value.
+             */
+            if ( strcmp(line, "max_heap_size") == 0 )
+                asprintf(&option_string, "-Xmx%s", opt_value);
+            else if ( strcmp(line, "min_heap_size") == 0 )
+                asprintf(&option_string, "-Xms%s", opt_value);
+            else if ( strcmp(line, "stack_size") == 0 )
+                asprintf(&option_string, "-Xss%s", opt_value);
+            else if ( strcmp(line, "append") == 0 )
+                option_string = strdup(opt_value);
+
+            if ( option_string ) {
+                warnx("Appending Java option: %s", option_string);
+                if ( *n_options >= current_max ) {
+                    current_max += 10;
+                    *jvm_opts = realloc(*jvm_opts, current_max * sizeof(JavaVMOption));
+                }
+                (*jvm_opts)[(*n_options)++].optionString = option_string;
+            }
+        }
+    }
+
+    fclose(conf_file);
+}
+
 static JavaVMOption *
 get_jvm_options(int *n_options)
 {
@@ -149,6 +265,8 @@ get_jvm_options(int *n_options)
     jvm_opts = calloc(*n_options, sizeof(JavaVMOption));
     for ( i = 0; i < *n_options; i++ )
         jvm_opts[i].optionString = default_jvm_options[i];
+
+    get_extra_jvm_options(&jvm_opts, n_options);
 
     return jvm_opts;
 }
@@ -175,9 +293,7 @@ main(int argc, char **argv)
     if ( ! (java_library = load_jre(bundle_path)) )
         err(EXIT_FAILURE, "Cannot load the bundled JRE");
 
-    /* Preparing Java options.
-     * TODO: allow to configure memory parameters. */
-
+    /* Preparing Java options. */
     jvm_args.version = JNI_VERSION_1_2;
     jvm_args.options = get_jvm_options(&(jvm_args.nOptions));
     jvm_args.ignoreUnrecognized = JNI_TRUE;
