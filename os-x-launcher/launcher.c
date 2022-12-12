@@ -204,16 +204,26 @@ get_line(FILE *f, char *buffer, size_t len)
 }
 
 static void
-get_extra_jvm_options(JavaVMOption **jvm_opts, int *n_options)
+append_jvm_option(JavaVMOption **jvm_opts, int *n_options, int *max_options, char *new_option)
+{
+    warnx("Appending Java option: %s", new_option);
+    if ( *n_options >= *max_options ) {
+        (*max_options) += 10;
+        *jvm_opts = realloc(*jvm_opts, (*max_options) * sizeof(JavaVMOption));
+    }
+    (*jvm_opts)[(*n_options)++].optionString = new_option;
+}
+
+static int
+get_extra_jvm_options_from_conf_file(JavaVMOption **jvm_opts, int *n_options, int *max_options)
 {
     char conf_file_path[PATH_MAX];
     char line[100], *opt_value, *option_string;
     ssize_t n;
-    int current_max = *n_options;
     FILE *conf_file;
 
     if ( ! find_configuration_file(conf_file_path, PATH_MAX) )
-        return;
+        return -1;
 
     if ( ! (conf_file = fopen(conf_file_path, "r")) ) {
         warn("Cannot open configuration file at %s", conf_file_path);
@@ -241,32 +251,68 @@ get_extra_jvm_options(JavaVMOption **jvm_opts, int *n_options)
             else if ( strcmp(line, "append") == 0 )
                 option_string = strdup(opt_value);
 
-            if ( option_string ) {
-                warnx("Appending Java option: %s", option_string);
-                if ( *n_options >= current_max ) {
-                    current_max += 10;
-                    *jvm_opts = realloc(*jvm_opts, current_max * sizeof(JavaVMOption));
-                }
-                (*jvm_opts)[(*n_options)++].optionString = option_string;
-            }
+            if ( option_string )
+                append_jvm_option(jvm_opts, n_options, max_options, option_string);
         }
     }
 
     fclose(conf_file);
+
+    return 0;
+}
+
+static void
+get_extra_jvm_options_from_bundle(JavaVMOption **jvm_opts, int *n_options, int *max_options)
+{
+    CFBundleRef main_bundle;
+    CFDictionaryRef info_dict;
+    CFArrayRef jvmopts_array;
+    CFIndex length, i;
+
+    if ( ! (main_bundle = CFBundleGetMainBundle()) )
+        return;
+
+    if ( ! (info_dict = CFBundleGetInfoDictionary(main_bundle)) )
+        return;
+
+    if ( ! (jvmopts_array = (CFArrayRef)CFDictionaryGetValue(info_dict, CFSTR("JVMOptions"))) )
+        return;
+
+    length = CFArrayGetCount(jvmopts_array);
+    for ( i = 0; i < length; i++ ) {
+        CFStringRef option = CFArrayGetValueAtIndex(jvmopts_array, i);
+        if ( CFStringHasPrefix(option, CFSTR("-Xmx")) 
+            || CFStringHasPrefix(option, CFSTR("-Xms"))
+            || CFStringHasPrefix(option, CFSTR("-Xss")) ) {
+            CFIndex option_length;
+            char *option_string;
+
+            /*
+             * TODO: Check for correctness of the option value.
+             */
+            option_length = CFStringGetLength(option);
+            option_string = malloc(option_length + 1);
+            CFStringGetCString(option, option_string, option_length + 1, kCFStringEncodingMacRoman);
+
+            append_jvm_option(jvm_opts, n_options, max_options, option_string);
+        }
+    }
 }
 
 static JavaVMOption *
 get_jvm_options(int *n_options)
 {
     JavaVMOption *jvm_opts = NULL;
-    int i;
+    int i, max_options;
 
     *n_options = (sizeof(default_jvm_options) / sizeof(char *)) - 1;
+    max_options = *n_options;
     jvm_opts = calloc(*n_options, sizeof(JavaVMOption));
     for ( i = 0; i < *n_options; i++ )
         jvm_opts[i].optionString = default_jvm_options[i];
 
-    get_extra_jvm_options(&jvm_opts, n_options);
+    if ( get_extra_jvm_options_from_conf_file(&jvm_opts, n_options, &max_options) == -1 )
+        get_extra_jvm_options_from_bundle(&jvm_opts, n_options, &max_options);
 
     return jvm_opts;
 }
