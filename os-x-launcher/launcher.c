@@ -234,9 +234,43 @@ get_line(FILE *f, char *buffer, size_t len)
     return n;
 }
 
+static int
+check_memory_option(const char *option)
+{
+    char *suffix = NULL;
+
+    errno = 0;
+    (void) strtoul(option, &suffix, 10);
+    if ( errno != 0 )
+        return -1;
+
+    if ( *suffix != '\0' ) {
+        /* If present, the suffix must be in [kKmMgGtT]. */
+        if ( (*suffix != 'k' && *suffix != 'K'
+                && *suffix != 'm' && *suffix != 'M'
+                && *suffix != 'g' && *suffix != 'G'
+                && *suffix != 't' && *suffix != 'T')
+            || *(suffix + 1) != '\0' ) {
+            errno = EINVAL;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 static void
 append_jvm_option(JavaVMOption **jvm_opts, int *n_options, int *max_options, char *new_option)
 {
+    if ( strncmp(new_option, "-Xmx", 4) == 0
+        || strncmp(new_option, "-Xms", 4) == 0
+        || strncmp(new_option, "-Xss", 4) == 0 ) {
+        if ( check_memory_option(&new_option[4]) == -1 ) {
+            warn("Ignoring ill-formatted option '%s'", new_option);
+            return;
+        }
+    }
+
     warnx("Appending Java option: %s", new_option);
     if ( *n_options >= *max_options ) {
         (*max_options) += 10;
@@ -270,9 +304,6 @@ get_extra_jvm_options_from_conf_file(JavaVMOption **jvm_opts, int *n_options, in
 
             *opt_value++ = '\0';
             option_string = NULL;
-            /*
-             * TODO: Check for correctness of the option value.
-             */
             if ( strcmp(line, "max_heap_size") == 0 )
                 asprintf(&option_string, "-Xmx%s", opt_value);
             else if ( strcmp(line, "min_heap_size") == 0 )
@@ -318,9 +349,6 @@ get_extra_jvm_options_from_bundle(JavaVMOption **jvm_opts, int *n_options, int *
             CFIndex option_length;
             char *option_string;
 
-            /*
-             * TODO: Check for correctness of the option value.
-             */
             option_length = CFStringGetLength(option);
             option_string = malloc(option_length + 1);
             CFStringGetCString(option, option_string, option_length + 1, kCFStringEncodingMacRoman);
